@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram OSINT Lookup</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 40px 20px;
+        }
+        .container {
+            width: 100%;
+            max-width: 640px;
+        }
+        h1 {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+            color: #58a6ff;
+        }
+        .subtitle {
+            color: #8b949e;
+            margin-bottom: 24px;
+            font-size: 0.9rem;
+        }
+        .input-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            background: #161b22;
+            color: #c9d1d9;
+            font-size: 1rem;
+            outline: none;
+        }
+        input[type="text"]:focus {
+            border-color: #58a6ff;
+        }
+        button {
+            padding: 12px 24px;
+            background: #238636;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover { background: #2ea043; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 24px;
+            display: none;
+        }
+        .card.visible { display: block; }
+        .card.error { border-color: #da3633; }
+        
+        .field {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid #21262d;
+        }
+        .field:last-child { border-bottom: none; }
+        .label {
+            width: 140px;
+            color: #8b949e;
+            flex-shrink: 0;
+        }
+        .value { color: #c9d1d9; word-break: break-all; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .badge.scam { background: #da3633; color: white; }
+        .badge.verified { background: #1f6feb; color: white; }
+        .badge.premium { background: #d2a106; color: black; }
+        
+        .links { margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap; }
+        .links a {
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .links a:hover { text-decoration: underline; }
+        
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 40px 0;
+            color: #8b949e;
+        }
+        .loader.visible { display: block; }
+        .spinner {
+            border: 3px solid #30363d;
+            border-top: 3px solid #58a6ff;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .not-found {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            display: none;
+        }
+        .not-found.visible { display: block; }
+        .not-found h3 { color: #f85149; margin-bottom: 8px; }
+        
+        .footer {
+            margin-top: 32px;
+            text-align: center;
+            color: #484f58;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Telegram OSINT</h1>
+        <p class="subtitle">Look up phone numbers on Telegram</p>
+        
+        <div class="input-group">
+            <input type="text" id="phoneInput" placeholder="+917907527421" autocomplete="off">
+            <button id="lookupBtn">Lookup</button>
+        </div>
+        
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <span>Searching Telegram...</span>
+        </div>
+        
+        <div class="card" id="resultCard"></div>
+        <div class="not-found" id="notFound"></div>
+        
+        <div class="footer">Telegram OSINT Tool &mdash; Authorized use only</div>
+    </div>
+    
+    <script>
+        const phoneInput = document.getElementById('phoneInput');
+        const lookupBtn = document.getElementById('lookupBtn');
+        const loader = document.getElementById('loader');
+        const resultCard = document.getElementById('resultCard');
+        const notFound = document.getElementById('notFound');
+        
+        phoneInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') lookup();
+        });
+        
+        lookupBtn.addEventListener('click', lookup);
+        
+        async function lookup() {
+            const phone = phoneInput.value.trim();
+            if (!phone) return;
+            
+            resultCard.classList.remove('visible');
+            resultCard.classList.remove('error');
+            notFound.classList.remove('visible');
+            loader.classList.add('visible');
+            lookupBtn.disabled = true;
+            
+            try {
+                const res = await fetch('/lookup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'phone=' + encodeURIComponent(phone)
+                });
+                
+                const data = await res.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                } else if (data.found) {
+                    showResult(data.data);
+                } else {
+                    showNotFound(data.data);
+                }
+            } catch (err) {
+                showError('Network error: ' + err.message);
+            } finally {
+                loader.classList.remove('visible');
+                lookupBtn.disabled = false;
+            }
+        }
+        
+        function showResult(d) {
+            const name = [d.first_name, d.last_name].filter(Boolean).join(' ') || 'N/A';
+            const badges = [];
+            if (d.is_scam) badges.push('<span class="badge scam">SCAM</span>');
+            if (d.is_verified) badges.push('<span class="badge verified">Verified</span>');
+            if (d.is_premium) badges.push('<span class="badge premium">Premium</span>');
+            if (d.is_bot) badges.push('<span class="badge" style="background:#8957e5">Bot</span>');
+            
+            resultCard.innerHTML = `
+                <div class="field"><span class="label">Name</span><span class="value">${name} ${badges.join(' ')}</span></div>
+                <div class="field"><span class="label">Username</span><span class="value">${d.username ? '@' + d.username : 'N/A'}</span></div>
+                <div class="field"><span class="label">User ID</span><span class="value">${d.user_id}</span></div>
+                <div class="field"><span class="label">Phone</span><span class="value">${d.phone_visible}</span></div>
+                <div class="field"><span class="label">Bio</span><span class="value">${d.bio || 'N/A'}</span></div>
+                <div class="field"><span class="label">Profile Photo</span><span class="value">${d.profile_photo}</span></div>
+                <div class="field"><span class="label">Common Chats</span><span class="value">${d.common_chats}</span></div>
+                ${d.carrier ? `<div class="field"><span class="label">Carrier</span><span class="value">${d.carrier}</span></div>` : ''}
+                ${d.location ? `<div class="field"><span class="label">Location</span><span class="value">${d.location}</span></div>` : ''}
+                <div class="links">
+                    <a href="${d.telegram_link}" target="_blank">Telegram</a>
+                    <a href="${d.whatsapp_link}" target="_blank">WhatsApp</a>
+                    <a href="${d.truecaller_link}" target="_blank">TrueCaller</a>
+                </div>
+            `;
+            resultCard.classList.add('visible');
+        }
+        
+        function showNotFound(d) {
+            notFound.innerHTML = `
+                <h3>Not Found on Telegram</h3>
+                <p style="color:#8b949e;margin-bottom:12px">This number doesn't appear to be registered on Telegram.</p>
+                <div class="links" style="justify-content:center">
+                    <a href="${d.whatsapp_link || '#'}" target="_blank">WhatsApp</a>
+                    <a href="${d.telegram_link || '#'}" target="_blank">Telegram (direct)</a>
+                </div>
+            `;
+            notFound.classList.add('visible');
+        }
+        
+        function showError(msg) {
+            resultCard.innerHTML = `<div style="color:#f85149">${msg}</div>`;
+            resultCard.classList.add('visible');
+            resultCard.classList.add('error');
+        }
+    </script>
+</body>
+</html>
